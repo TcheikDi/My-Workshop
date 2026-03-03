@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Meta-Labor: Pro-Edition & Science Park</title>
+    <title>Meta-Labor: Ergonomische VR-Werkstatt</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
@@ -53,54 +53,37 @@
             background: rgba(255,255,255,0.4);
             padding: 8px;
         }
-        #info-overlay {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.9);
-            color: white;
-            padding: 25px;
-            border-radius: 15px;
-            display: none;
-            max-width: 450px;
-            pointer-events: auto;
-            z-index: 100;
-            text-align: center;
-            border: 2px solid #3498db;
-        }
     </style>
 </head>
 <body>
 
+    <!-- Chosen Palette: Labor-Blau, Clean White und Natur-Grün -->
+    <!-- Application Structure Plan: Eine immersive 3D/VR Werkstatt, skaliert auf reale Maße (1 Unit = 1 Meter). Tische sind auf 0.75m Höhe. Steuerung nutzt Smooth Locomotion links und Teleport rechts. Interaktionen erfolgen über Raycasting am rechten Controller. -->
+    <!-- Visualization & Content Choices: Bausatz-Modelle -> 3D Mesh Aggregation -> Raycaster-Trigger -> Montage-Logik. Alle UI-Elemente sind für VR in den 3D-Raum gespiegelt (Bestellwürfel). NO SVG/Mermaid used. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+
 <div id="ui-container">
     <div class="panel">
-        <h1>Labor-Terminal</h1>
-        <p>Nutze am PC die Buttons. In VR: Klicke auf die <b>3D-Würfel am Tresen</b> zum Bestellen!</p>
-        <p>In VR: <b>L-Stick</b> = Gehen, <b>R-Stick Oben</b> = Teleport, <b>Trigger</b> = Bauen.</p>
+        <h1>Labor-Zentrale</h1>
+        <p><b>L-Stick:</b> Gehen | <b>R-Stick:</b> Drehen & Teleport</p>
+        <p>In VR: Nutze die <b>farbigen Würfel</b> auf dem Tresen zum Bestellen.</p>
         <div class="kit-grid">
             <button onclick="orderKit('windmill')">Windmühle</button>
-            <button onclick="orderKit('car')">Solar-Auto (10T)</button>
-            <button onclick="orderKit('chemistry')">Chemie-Set</button>
+            <button onclick="orderKit('car')">Solar-Auto</button>
+            <button onclick="orderKit('chemistry')">Chemie</button>
             <button onclick="orderKit('fuelcell')">Brennstoffzelle</button>
         </div>
     </div>
     
     <div id="assembly-panel" class="panel" style="display:none;">
-        <h1 id="kit-title">Bau-Phase</h1>
+        <h1 id="kit-title">Montage</h1>
         <div id="progress-bar" style="width: 100%; height: 8px; background: #eee; border-radius: 4px; overflow: hidden;">
             <div id="progress-fill" style="width: 0%; height: 100%; background: #2ecc71; transition: width 0.3s;"></div>
         </div>
     </div>
 </div>
 
-<div id="info-overlay">
-    <h2 id="overlay-title" style="color: #3498db;">Info</h2>
-    <p id="overlay-text"></p>
-    <button onclick="document.getElementById('info-overlay').style.display='none'" style="margin-top:15px; width:auto; background:#3498db; color:white; border:none; padding:8px 15px; border-radius:4px; cursor:pointer;">Verstanden</button>
-</div>
-
-<div id="status-msg">In VR: Bestell-Würfel liegen auf dem Tresen links!</div>
+<div id="status-msg">Maßstab auf reale 1:1 Größe angepasst.</div>
 
 <script type="module">
     import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/webxr/VRButton.js';
@@ -117,7 +100,7 @@
     let controllerR, controllerL;
     let xrGroup;
     let canSnapTurn = true;
-    const moveSpeed = 0.08;
+    const moveSpeed = 0.06;
 
     function init() {
         scene = new THREE.Scene();
@@ -128,7 +111,7 @@
         scene.add(xrGroup);
 
         camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 1.6, 12);
+        camera.position.set(0, 1.6, 10);
         xrGroup.add(camera);
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -141,7 +124,7 @@
         document.body.appendChild(VRButton.createButton(renderer));
 
         controls = new THREE.OrbitControls(camera, renderer.domElement);
-        controls.target.set(0, 1.6, 0);
+        controls.target.set(0, 1.0, 0);
         controls.enableDamping = true;
 
         raycaster = new THREE.Raycaster();
@@ -150,7 +133,6 @@
         setupLighting();
         createEnvironment();
         createArchitecture();
-        createMachines();
         createSciencePlayground();
         setupVR();
 
@@ -163,9 +145,10 @@
 
     function setupLighting() {
         scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.7));
-        const sun = new THREE.DirectionalLight(0xffffff, 0.9);
-        sun.position.set(50, 80, 20);
+        const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+        sun.position.set(20, 40, 10);
         sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
         scene.add(sun);
     }
 
@@ -179,14 +162,14 @@
         scene.add(meadow);
         floorMeshes.push(meadow);
 
-        for(let i=0; i<80; i++) {
+        for(let i=0; i<60; i++) {
             const rx = (Math.random() - 0.5) * 450; const rz = (Math.random() - 0.5) * 450;
-            if(Math.abs(rx) < 60 && Math.abs(rz) < 60) continue;
+            if(Math.abs(rx) < 40 && Math.abs(rz) < 40) continue;
             const tree = new THREE.Group();
-            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, 2.5), new THREE.MeshStandardMaterial({color: 0x4b3621}));
-            trunk.position.y = 1.25; tree.add(trunk);
-            const leaves = new THREE.Mesh(new THREE.ConeGeometry(2, 4, 8), new THREE.MeshStandardMaterial({color: 0x2d5a27}));
-            leaves.position.y = 3.5; tree.add(leaves);
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 2), new THREE.MeshStandardMaterial({color: 0x4b3621}));
+            trunk.position.y = 1.0; tree.add(trunk);
+            const leaves = new THREE.Mesh(new THREE.ConeGeometry(1.5, 3, 8), new THREE.MeshStandardMaterial({color: 0x2d5a27}));
+            leaves.position.y = 3.0; tree.add(leaves);
             tree.position.set(rx, 0, rz); scene.add(tree);
         }
 
@@ -205,90 +188,75 @@
         scene.add(labFloor);
         floorMeshes.push(labFloor);
         
-        const wallMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 });
-        const backWall = new THREE.Mesh(new THREE.BoxGeometry(40, 8, 0.2), wallMat);
-        backWall.position.set(0, 4, -20); scene.add(backWall);
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+        const backWall = new THREE.Mesh(new THREE.BoxGeometry(40, 6, 0.2), wallMat);
+        backWall.position.set(0, 3, -20); scene.add(backWall);
 
+        // ERGONOMIE: Tischhöhe auf 0.75m
+        const tableHeight = 0.75;
         for (let i = 0; i < 4; i++) {
             for (let j = 0; j < 5; j++) {
-                const tx = (i * 9) - 13.5; const tz = (j * 7) - 14;
-                createTableAndChairs(tx, tz);
+                const tx = (i * 8) - 12; const tz = (j * 7) - 14;
+                const tableGroup = new THREE.Group();
+                const plate = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.08, 2.2), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+                plate.position.y = tableHeight; plate.userData = { type: 'table_top', pos: new THREE.Vector3(tx, tableHeight + 0.04, tz) };
+                tableGroup.add(plate); tables.push(plate); interactiveObjects.push(plate);
+                
+                const legGeo = new THREE.CylinderGeometry(0.04, 0.04, tableHeight);
+                const legMat = new THREE.MeshStandardMaterial({color:0x777777});
+                [[1.6, tableHeight/2, 1.0], [-1.6, tableHeight/2, 1.0], [1.6, tableHeight/2, -1.0], [-1.6, tableHeight/2, -1.0]].forEach(p => {
+                    const leg = new THREE.Mesh(legGeo, legMat);
+                    leg.position.set(p[0], p[1], p[2]); tableGroup.add(leg);
+                });
+
+                // Stühle mit korrekten Beinen
+                for(let s=0; s<2; s++) {
+                    createChair(tableGroup, 0, 0, (s === 0 ? 1.6 : -1.6), (s === 0 ? 0 : Math.PI));
+                }
+                tableGroup.position.set(tx, 0, tz);
+                scene.add(tableGroup);
             }
         }
 
         // Terminal Tresen
-        const counter = new THREE.Mesh(new THREE.BoxGeometry(4, 1.1, 8), new THREE.MeshStandardMaterial({ color: 0x2c3e50 }));
-        counter.position.set(-18, 0.55, 0); scene.add(counter);
+        const counter = new THREE.Mesh(new THREE.BoxGeometry(3, 0.9, 8), new THREE.MeshStandardMaterial({ color: 0x2c3e50 }));
+        counter.position.set(-18, 0.45, 0); scene.add(counter);
 
-        // --- VR BESTELL-BUTTONS (3D) ---
-        const kitTypes = [
-            { type: 'windmill', color: 0x3498db, pos: -2 },
-            { type: 'car', color: 0xe74c3c, pos: -0.7 },
-            { type: 'chemistry', color: 0x2ecc71, pos: 0.6 },
-            { type: 'fuelcell', color: 0xf1c40f, pos: 1.9 }
+        // 3D VR Menü Buttons am Tresen
+        const kits = [
+            { id: 'windmill', col: 0x3498db, z: -2 },
+            { id: 'car', col: 0xe74c3c, z: -0.6 },
+            { id: 'chemistry', col: 0x2ecc71, z: 0.8 },
+            { id: 'fuelcell', col: 0xf1c40f, z: 2.2 }
         ];
-
-        kitTypes.forEach(kit => {
-            const btnGeo = new THREE.BoxGeometry(0.4, 0.2, 0.4);
-            const btnMat = new THREE.MeshStandardMaterial({ color: kit.color });
-            const btn = new THREE.Mesh(btnGeo, btnMat);
-            btn.position.set(-17.5, 1.2, kit.pos);
-            btn.userData = { type: 'vr_order_btn', kit: kit.type };
-            scene.add(btn);
-            interactiveObjects.push(btn);
+        kits.forEach(k => {
+            const b = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.15, 0.3), new THREE.MeshStandardMaterial({color: k.col}));
+            b.position.set(-17.5, 0.98, k.z); b.userData = { type: 'vr_order_btn', kit: k.id };
+            scene.add(b); interactiveObjects.push(b);
         });
-    }
-
-    function createTableAndChairs(tx, tz) {
-        const tableGroup = new THREE.Group();
-        const plate = new THREE.Mesh(new THREE.BoxGeometry(4, 0.15, 2.5), new THREE.MeshStandardMaterial({ color: 0xffffff }));
-        plate.position.y = 1.1; plate.userData = { type: 'table_top', pos: new THREE.Vector3(tx, 1.18, tz) };
-        tableGroup.add(plate); tables.push(plate); interactiveObjects.push(plate);
-        
-        const legGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.1);
-        const legMat = new THREE.MeshStandardMaterial({color:0x777777});
-        [[1.8, 0.55, 1.1], [-1.8, 0.55, 1.1], [1.8, 0.55, -1.1], [-1.8, 0.55, -1.1]].forEach(p => {
-            const leg = new THREE.Mesh(legGeo, legMat);
-            leg.position.set(p[0], p[1], p[2]); tableGroup.add(leg);
-        });
-
-        for(let s=0; s<2; s++) {
-            createChair(tableGroup, 0, 0, (s === 0 ? 1.8 : -1.8), (s === 0 ? 0 : Math.PI));
-        }
-
-        tableGroup.position.set(tx, 0, tz);
-        scene.add(tableGroup);
     }
 
     function createChair(parent, x, y, z, rot = 0) {
         const chair = new THREE.Group();
         const mat = new THREE.MeshStandardMaterial({color: 0x333333});
-        const seat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.8), mat);
-        seat.position.y = 0.6; chair.add(seat);
-        const back = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.1), mat);
-        back.position.set(0, 1.0, 0.4); chair.add(back);
+        const seatHeight = 0.45;
+        const seat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.08, 0.7), mat);
+        seat.position.y = seatHeight; chair.add(seat);
+        const back = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.08), mat);
+        back.position.set(0, seatHeight + 0.35, 0.35); chair.add(back);
         
-        const legGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.6);
-        [[0.3, 0.3, 0.3], [-0.3, 0.3, 0.3], [0.3, 0.3, -0.3], [-0.3, 0.3, -0.3]].forEach(p => {
+        const legGeo = new THREE.CylinderGeometry(0.025, 0.025, seatHeight);
+        [[0.25, seatHeight/2, 0.25], [-0.25, seatHeight/2, 0.25], [0.25, seatHeight/2, -0.25], [-0.25, seatHeight/2, -0.25]].forEach(p => {
             const leg = new THREE.Mesh(legGeo, mat);
-            leg.position.set(p[0], p[1], p[2]);
-            chair.add(leg);
+            leg.position.set(p[0], p[1], p[2]); chair.add(leg);
         });
-
-        chair.position.set(x, y, z);
-        chair.rotation.y = rot;
+        chair.position.set(x, y, z); chair.rotation.y = rot;
         parent.add(chair);
-    }
-
-    function createMachines() {
-        const roomFloor = new THREE.Mesh(new THREE.PlaneGeometry(30, 40), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
-        roomFloor.rotation.x = -Math.PI / 2; roomFloor.position.set(35, 0.03, 0); scene.add(roomFloor);
-        floorMeshes.push(roomFloor);
     }
 
     function createSciencePlayground() {
         const area = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0xd2b48c }));
-        area.rotation.x = -Math.PI / 2; area.position.set(-60, 0.04, -60); scene.add(area);
+        area.rotation.x = -Math.PI / 2; area.position.set(-60, 0.03, -60); scene.add(area);
         floorMeshes.push(area);
 
         // Newton
@@ -296,122 +264,89 @@
             const ballGroup = new THREE.Group();
             const ball = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), new THREE.MeshStandardMaterial({color: 0xaaaaaa, metalness: 0.8}));
             ball.position.y = -5; ball.userData = { type: 'newton_ball', index: i }; 
-            ballGroup.add(ball); ballGroup.position.set(-1.6 + (i * 0.81), 6, 0);
+            ballGroup.add(ball); ballGroup.position.set(-1.6 + (i * 0.82), 6, 0);
             const framePos = new THREE.Vector3(-60, 0, -50);
-            ballGroup.position.add(framePos);
-            scene.add(ballGroup);
-            playgroundObjects.newtonBalls.push(ballGroup);
-            interactiveObjects.push(ball);
+            ballGroup.position.add(framePos); scene.add(ballGroup);
+            playgroundObjects.newtonBalls.push(ballGroup); interactiveObjects.push(ball);
         }
 
-        // Carousel
-        const carousel = new THREE.Group();
-        const cBase = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 4.5, 0.3, 32), new THREE.MeshStandardMaterial({color: 0xe74c3c}));
-        cBase.userData = { type: 'carousel' }; carousel.add(cBase);
-        carousel.position.set(-75, 0.15, -70); scene.add(carousel);
-        playgroundObjects.carousel = carousel;
-        interactiveObjects.push(cBase);
+        const carousel = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.2, 32), new THREE.MeshStandardMaterial({color: 0xe74c3c}));
+        carousel.position.set(-75, 0.1, -70); carousel.userData = { type: 'carousel' };
+        scene.add(carousel); playgroundObjects.carousel = carousel; interactiveObjects.push(carousel);
 
-        // Seesaw
-        const seesaw = new THREE.Group();
-        const plank = new THREE.Mesh(new THREE.BoxGeometry(8, 0.15, 0.8), new THREE.MeshStandardMaterial({color: 0xf1c40f}));
-        plank.position.y = 1.1; plank.userData = { type: 'seesaw' }; seesaw.add(plank);
-        playgroundObjects.seesawPlank = plank; seesaw.position.set(-45, 0, -70); scene.add(seesaw);
-        interactiveObjects.push(plank);
+        const plank = new THREE.Mesh(new THREE.BoxGeometry(8, 0.1, 0.8), new THREE.MeshStandardMaterial({color: 0xf1c40f}));
+        plank.position.set(-45, 1.0, -70); plank.userData = { type: 'seesaw' };
+        scene.add(plank); playgroundObjects.seesawPlank = plank; interactiveObjects.push(plank);
     }
 
     // --- LOGIC ---
     window.orderKit = function(type) {
         if (kitBox) scene.remove(kitBox);
         activeKitType = type; assemblyStep = 1;
-        kitBox = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 1.2), new THREE.MeshStandardMaterial({ color: 0xd2b48c }));
-        kitBox.position.set(-18, 1.4, 0); kitBox.userData = { type: 'kit_box' };
+        kitBox = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.6, 1.0), new THREE.MeshStandardMaterial({ color: 0xd2b48c }));
+        kitBox.position.set(-18, 1.3, 0); kitBox.userData = { type: 'kit_box' };
         scene.add(kitBox);
         interactiveObjects.push(kitBox);
-        document.getElementById('status-msg').innerText = "Paket geliefert! Klicke es zum Tragen an.";
+        document.getElementById('status-msg').innerText = "Paket geliefert!";
     };
 
     function unpackKit() {
-        if (!currentTable) return;
         scene.remove(kitBox); kitBox = null; assemblyStep = 1;
         parts.forEach(p => scene.remove(p)); parts = [];
         document.getElementById('assembly-panel').style.display = 'block';
         const tx = currentTable.x; const tz = currentTable.z;
+        const th = currentTable.y;
 
         if (activeKitType === 'windmill') {
-            totalSteps = 3; createWindmillParts(tx, tz);
+            totalSteps = 3;
+            createWindmillParts(tx, th, tz);
         } else if (activeKitType === 'car') {
-            totalSteps = 10; createCarParts(tx, tz);
-        } else if (activeKitType === 'chemistry') {
-            totalSteps = 4; createChemistryParts(tx, tz);
-        } else if (activeKitType === 'fuelcell') {
-            totalSteps = 5; createFuelCellParts(tx, tz);
+            totalSteps = 10;
+            createCarParts(tx, th, tz);
+        } else {
+            totalSteps = 1;
+            const dummy = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshStandardMaterial({color:0x3498db}));
+            dummy.position.set(tx, th + 0.2, tz); dummy.userData = { step: 1 };
+            scene.add(dummy); parts.push(dummy); interactiveObjects.push(dummy);
         }
     }
 
-    function createWindmillParts(tx, tz) {
-        const b = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.5,0.1), new THREE.MeshStandardMaterial({color:0x333333}));
-        b.position.set(tx-1, 1.3, tz); b.userData = { step: 1 }; scene.add(b); parts.push(b); interactiveObjects.push(b);
-        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 1.2), new THREE.MeshStandardMaterial({color:0xbdc3c7}));
-        m.position.set(tx+1, 1.3, tz); m.userData = { step: 2 }; scene.add(m); parts.push(m); interactiveObjects.push(m);
-        const r = new THREE.Group(); r.add(new THREE.Mesh(new THREE.SphereGeometry(0.12)));
+    function createWindmillParts(tx, th, tz) {
+        const b = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.1), new THREE.MeshStandardMaterial({color:0x333333}));
+        b.position.set(tx-1, th+0.05, tz); b.userData = { step: 1 }; scene.add(b); parts.push(b); interactiveObjects.push(b);
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.08, 1.2), new THREE.MeshStandardMaterial({color:0xbdc3c7}));
+        m.position.set(tx+1, th+0.05, tz); m.userData = { step: 2 }; scene.add(m); parts.push(m); interactiveObjects.push(m);
+        const r = new THREE.Group(); r.add(new THREE.Mesh(new THREE.SphereGeometry(0.1)));
         for(let i=0; i<3; i++){
-            const blade = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.8, 0.02), new THREE.MeshStandardMaterial({color:0x3498db}));
-            const p = new THREE.Object3D(); p.rotation.z = (i*Math.PI*2)/3; blade.position.y = 0.4; p.add(blade); r.add(p);
+            const blade = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.7, 0.02), new THREE.MeshStandardMaterial({color:0x3498db}));
+            const p = new THREE.Object3D(); p.rotation.z = (i*Math.PI*2)/3; blade.position.y = 0.35; p.add(blade); r.add(p);
         }
-        r.position.set(tx, 1.3, tz+0.8); r.userData = { step: 3 }; 
-        scene.add(r); parts.push(r); interactiveObjects.push(r);
+        r.position.set(tx, th+0.05, tz+0.7); r.userData = { step: 3 }; 
         r.children.forEach(c => { c.userData.parentPart = r; interactiveObjects.push(c); });
+        scene.add(r); parts.push(r); interactiveObjects.push(r);
     }
 
-    function createCarParts(tx, tz) {
+    function createCarParts(tx, th, tz) {
         for(let i=0; i<10; i++) {
-            const p = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.4), new THREE.MeshStandardMaterial({color: Math.random()*0xffffff}));
-            p.position.set(tx + (Math.random()-0.5)*2, 1.3, tz + (Math.random()-0.5)*1.5);
+            const p = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.15, 0.3), new THREE.MeshStandardMaterial({color: Math.random()*0xffffff}));
+            p.position.set(tx + (Math.random()-0.5)*2, th+0.1, tz + (Math.random()-0.5)*1.5);
             p.userData = { step: i+1 }; scene.add(p); parts.push(p); interactiveObjects.push(p);
-        }
-    }
-
-    function createChemistryParts(tx, tz) {
-        for(let i=0; i<4; i++){
-            const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,0.6), new THREE.MeshStandardMaterial({color: 0x00ff00, transparent:true, opacity:0.6}));
-            tube.position.set(tx-1+(i*0.6), 1.25, tz); tube.userData = { step: i+1 }; 
-            scene.add(tube); parts.push(tube); interactiveObjects.push(tube);
-        }
-    }
-
-    function createFuelCellParts(tx, tz) {
-        for(let i=0; i<5; i++){
-            const cell = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.2), new THREE.MeshStandardMaterial({color: 0x4444ff}));
-            cell.position.set(tx-1+(i*0.5), 1.25, tz); cell.userData = { step: i+1 }; 
-            scene.add(cell); parts.push(cell); interactiveObjects.push(cell);
         }
     }
 
     function tryAssemble(part) {
         const step = part.userData.step; if (step !== assemblyStep) return;
-        const tx = currentTable.x; const tz = currentTable.z;
+        const tx = currentTable.x; const tz = currentTable.z; const th = currentTable.y;
+
         if (activeKitType === 'windmill') {
-            if(step === 1) part.position.set(tx, 1.18, tz);
-            if(step === 2) { part.rotation.z = 0; part.position.set(tx, 1.78, tz); }
-            if(step === 3) { part.position.set(tx, 2.38, tz+0.1); part.rotation.x = Math.PI/2; activeModel = part; isWindmillSpinning = true; }
-        } else if (activeKitType === 'car') {
-            part.position.set(tx, 1.25 + (step * 0.05), tz);
-            if(step === 10) showInfo("Solar-Auto", "Fertig montiert!");
-        } else if (activeKitType === 'fuelcell' && step === 5) {
-            part.position.set(tx, 1.6, tz);
-            showInfo("Brennstoffzelle", "Wandelt H2 und O2 direkt in Strom um. Nur Wasser als Abfall!");
+            if(step === 1) part.position.set(tx, th+0.05, tz);
+            if(step === 2) { part.rotation.z = 0; part.position.set(tx, th+0.65, tz); }
+            if(step === 3) { part.position.set(tx, th+1.2, tz+0.1); part.rotation.x = Math.PI/2; activeModel = part; isWindmillSpinning = true; }
         } else {
-            part.position.set(tx, 1.2 + (step*0.1), tz);
+            part.position.set(tx, th + 0.1 + (step * 0.05), tz);
         }
         assemblyStep++;
         document.getElementById('progress-fill').style.width = (assemblyStep/totalSteps * 100) + "%";
-    }
-
-    function showInfo(title, text) {
-        document.getElementById('overlay-title').innerText = title;
-        document.getElementById('overlay-text').innerText = text;
-        document.getElementById('info-overlay').style.display = 'block';
     }
 
     // --- VR SYSTEMS ---
@@ -442,29 +377,28 @@
             if (!source.gamepad) continue;
             const axes = source.gamepad.axes;
 
-            // --- LINKER CONTROLLER: Nur Gehen (L-Stick) ---
+            // LINKER CONTROLLER: Gehen (Stick-X korrigiert)
             if (source.handedness === 'left') {
                 if (Math.abs(axes[3]) > 0.1 || Math.abs(axes[2]) > 0.1) {
                     const direction = new THREE.Vector3();
                     camera.getWorldDirection(direction);
                     direction.y = 0; direction.normalize();
                     const side = new THREE.Vector3().crossVectors(camera.up, direction).normalize();
+                    
                     xrGroup.position.addScaledVector(direction, -axes[3] * moveSpeed);
-                    xrGroup.position.addScaledVector(side, axes[2] * moveSpeed);
+                    // KORREKTUR: -axes[2] statt axes[2] für korrekte Rechts/Links Richtung
+                    xrGroup.position.addScaledVector(side, -axes[2] * moveSpeed);
                 }
             }
 
-            // --- RECHTER CONTROLLER: Snap Turn & Teleport (R-Stick) ---
+            // RECHTER CONTROLLER: Snap Turn & Teleport
             if (source.handedness === 'right') {
-                // Snap Turn (X-Achse)
                 if (canSnapTurn && Math.abs(axes[2]) > 0.8) {
                     const angle = axes[2] > 0 ? -Math.PI / 4 : Math.PI / 4;
                     xrGroup.rotation.y += angle;
                     canSnapTurn = false;
                     setTimeout(() => { canSnapTurn = true; }, 300);
                 }
-
-                // Teleportation (Y-Achse nach OBEN)
                 if (axes[3] < -0.6) {
                     const tempMatrix = new THREE.Matrix4();
                     tempMatrix.identity().extractRotation(controllerR.matrixWorld);
@@ -476,7 +410,6 @@
                         teleportMarker.visible = true;
                     }
                 } else if (teleportMarker.visible) {
-                    // Beamen beim Loslassen
                     const camPos = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
                     const offset = new THREE.Vector3().copy(teleportMarker.position).sub(camPos.setY(0));
                     xrGroup.position.add(offset);
@@ -491,24 +424,30 @@
         if (intersects.length === 0) return;
         const target = intersects[0].object;
 
-        // VR Bestell-Buttons
         if (target.userData.type === 'vr_order_btn') {
             orderKit(target.userData.kit);
             return;
         }
-
         if (target.userData.type === 'carousel') playgroundState.carouselSpeed += 0.2;
         if (target.userData.type === 'seesaw') playgroundState.seesawTarget = (playgroundState.seesawTarget > 0) ? -0.3 : 0.3;
         if (target.userData.type === 'newton_ball') playgroundState.newtonPower = 1.0;
         
-        if (target.userData.type === 'kit_box' && !isCarrying) {
-            isCarrying = true; document.getElementById('status-msg').innerText = "Wähle einen Tisch."; return;
+        if (target.userData.type === 'kit_box') {
+            if (!isCarrying && !currentTable) {
+                isCarrying = true;
+                document.getElementById('status-msg').innerText = "Trage Paket zum Tisch...";
+            } else if (!isCarrying && currentTable) {
+                unpackKit();
+            }
+            return;
         }
         if (isCarrying && target.userData.type === 'table_top') {
-            currentTable = target.userData.pos; kitBox.position.copy(currentTable).setY(1.38);
-            isCarrying = false; assemblyStep = 2; document.getElementById('status-msg').innerText = "Box öffnen!"; return;
+            currentTable = target.userData.pos;
+            kitBox.position.copy(currentTable).setY(currentTable.y + 0.3);
+            isCarrying = false;
+            document.getElementById('status-msg').innerText = "Paket abgestellt. Klicken zum Auspacken.";
+            return;
         }
-        if (target.userData.type === 'kit_box' && !isCarrying) { unpackKit(); return; }
         
         let p = target; 
         if (p.userData.parentPart) p = p.userData.parentPart;
@@ -529,7 +468,7 @@
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
             mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
             raycaster.setFromCamera(mouse, camera);
-            const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.3);
+            const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.1);
             const intersectPoint = new THREE.Vector3(); raycaster.ray.intersectPlane(plane, intersectPoint);
             kitBox.position.copy(intersectPoint);
         }
