@@ -76,7 +76,7 @@
 <div id="ui-container">
     <div class="panel">
         <h1>Labor-Terminal</h1>
-        <p>Projekt wählen. In VR: <b>Linker Stick</b> = Teleport, <b>Rechter Stick</b> = Drehen!</p>
+        <p>In VR: <b>L-Stick</b> = Gehen/Teleport, <b>R-Stick</b> = Drehen, <b>R-Trigger</b> = Bauen/Action!</p>
         <div class="kit-grid">
             <button onclick="orderKit('windmill')">Windmühle</button>
             <button onclick="orderKit('car')">Solar-Auto (10T)</button>
@@ -99,7 +99,7 @@
     <button onclick="document.getElementById('info-overlay').style.display='none'" style="margin-top:15px; width:auto; background:#3498db; color:white; border:none; padding:8px 15px; border-radius:4px; cursor:pointer;">Verstanden</button>
 </div>
 
-<div id="status-msg">Bereit für dein Metaverse-Abenteuer.</div>
+<div id="status-msg">Bewegungs-Modus: Gehen & Teleport aktiv.</div>
 
 <script type="module">
     import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/webxr/VRButton.js';
@@ -116,6 +116,7 @@
     let controllerR, controllerL;
     let xrGroup;
     let canSnapTurn = true;
+    const moveSpeed = 0.1;
 
     function init() {
         scene = new THREE.Scene();
@@ -199,7 +200,7 @@
 
     function createArchitecture() {
         const labFloor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: 0xfafafa }));
-        labFloor.rotation.x = -Math.PI / 2; labFloor.position.y = 0.02; labFloor.receiveShadow = true;
+        labFloor.rotation.x = -Math.PI / 2; labFloor.position.y = 0.01; labFloor.receiveShadow = true;
         scene.add(labFloor);
         floorMeshes.push(labFloor);
         
@@ -210,33 +211,52 @@
         for (let i = 0; i < 4; i++) {
             for (let j = 0; j < 5; j++) {
                 const tx = (i * 9) - 13.5; const tz = (j * 7) - 14;
-                const tableGroup = new THREE.Group();
-                const plate = new THREE.Mesh(new THREE.BoxGeometry(4, 0.15, 2.5), new THREE.MeshStandardMaterial({ color: 0xffffff }));
-                plate.position.set(0, 1.1, 0); plate.userData = { type: 'table_top', pos: new THREE.Vector3(tx, 1.18, tz) };
-                tableGroup.add(plate); tables.push(plate);
-                
-                [[1.8, 0.55, 1], [-1.8, 0.55, 1], [1.8, 0.55, -1], [-1.8, 0.55, -1]].forEach(p => {
-                    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.1, 0.1), new THREE.MeshStandardMaterial({color:0x777777}));
-                    leg.position.set(p[0], p[1], p[2]); tableGroup.add(leg);
-                });
-
-                for(let s=0; s<2; s++) {
-                    const chair = new THREE.Group();
-                    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.8), new THREE.MeshStandardMaterial({color: 0x333333}));
-                    seat.position.y = 0.6; chair.add(seat);
-                    const back = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.1), new THREE.MeshStandardMaterial({color: 0x333333}));
-                    back.position.set(0, 1, 0.4); chair.add(back);
-                    chair.position.set(0, 0, (s === 0 ? 1.8 : -1.8));
-                    chair.rotation.y = (s === 0 ? 0 : Math.PI);
-                    tableGroup.add(chair);
-                }
-                tableGroup.position.set(tx, 0, tz);
-                scene.add(tableGroup);
+                createTableAndChairs(tx, tz);
             }
         }
 
         const counter = new THREE.Mesh(new THREE.BoxGeometry(4, 1.1, 8), new THREE.MeshStandardMaterial({ color: 0x2c3e50 }));
         counter.position.set(-18, 0.55, 0); scene.add(counter);
+    }
+
+    function createTableAndChairs(tx, tz) {
+        const tableGroup = new THREE.Group();
+        const plate = new THREE.Mesh(new THREE.BoxGeometry(4, 0.15, 2.5), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+        plate.position.set(0, 1.1, 0); plate.userData = { type: 'table_top', pos: new THREE.Vector3(tx, 1.18, tz) };
+        tableGroup.add(plate); tables.push(plate);
+        
+        [[1.8, 0.55, 1], [-1.8, 0.55, 1], [1.8, 0.55, -1], [-1.8, 0.55, -1]].forEach(p => {
+            const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.1, 0.1), new THREE.MeshStandardMaterial({color:0x777777}));
+            leg.position.set(p[0], p[1], p[2]); tableGroup.add(leg);
+        });
+
+        for(let s=0; s<2; s++) {
+            createChair(tableGroup, 0, 0, (s === 0 ? 1.8 : -1.8), (s === 0 ? 0 : Math.PI));
+        }
+
+        tableGroup.position.set(tx, 0, tz);
+        scene.add(tableGroup);
+    }
+
+    function createChair(parent, x, y, z, rot = 0) {
+        const chair = new THREE.Group();
+        const mat = new THREE.MeshStandardMaterial({color: 0x333333});
+        const seat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.8), mat);
+        seat.position.y = 0.6; chair.add(seat);
+        const back = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.1), mat);
+        back.position.set(0, 1.0, 0.4); chair.add(back);
+        
+        // Stuhlbeine hinzugefügt
+        const legGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.6);
+        [[0.3, 0.3, 0.3], [-0.3, 0.3, 0.3], [0.3, 0.3, -0.3], [-0.3, 0.3, -0.3]].forEach(p => {
+            const leg = new THREE.Mesh(legGeo, mat);
+            leg.position.set(p[0], p[1], p[2]);
+            chair.add(leg);
+        });
+
+        chair.position.set(x, y, z);
+        chair.rotation.y = rot;
+        parent.add(chair);
     }
 
     function createMachines() {
@@ -254,9 +274,11 @@
 
     function createSciencePlayground() {
         const area = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0xd2b48c }));
-        area.rotation.x = -Math.PI / 2; area.position.set(-60, 0.04, -60); scene.add(area);
+        area.rotation.x = -Math.PI / 2; area.position.set(-60, 0.04, -60); area.receiveShadow = true;
+        scene.add(area);
         floorMeshes.push(area);
 
+        // Newton
         const newtonFrame = new THREE.Group();
         for(let i=0; i<5; i++) {
             const ballGroup = new THREE.Group();
@@ -267,26 +289,124 @@
         }
         newtonFrame.position.set(-60, 0, -50); scene.add(newtonFrame);
 
+        // Carousel
         const carousel = new THREE.Group();
         const cBase = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 4.5, 0.3, 32), new THREE.MeshStandardMaterial({color: 0xe74c3c}));
         cBase.userData = { type: 'carousel' }; carousel.add(cBase);
         carousel.position.set(-75, 0.15, -70); scene.add(carousel);
         playgroundObjects.carousel = carousel;
 
+        // Seesaw
         const seesaw = new THREE.Group();
         const plank = new THREE.Mesh(new THREE.BoxGeometry(8, 0.15, 0.8), new THREE.MeshStandardMaterial({color: 0xf1c40f}));
         plank.position.y = 1.1; plank.userData = { type: 'seesaw' }; seesaw.add(plank);
         playgroundObjects.seesawPlank = plank; seesaw.position.set(-45, 0, -70); scene.add(seesaw);
     }
 
-    // --- KIT LOGIC ---
+    function setupVR() {
+        // Rechter Controller (Interaktion)
+        controllerR = renderer.xr.getController(0);
+        controllerR.addEventListener('selectstart', () => {
+            const tempMatrix = new THREE.Matrix4();
+            tempMatrix.identity().extractRotation(controllerR.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controllerR.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+            handleInteraction();
+        });
+        xrGroup.add(controllerR);
+
+        // Linker Controller (Bewegung & Teleport)
+        controllerL = renderer.xr.getController(1);
+        xrGroup.add(controllerL);
+
+        const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-10)]));
+        controllerR.add(line.clone()); 
+        controllerL.add(line.clone());
+    }
+
+    function handleVRInput() {
+        const session = renderer.xr.getSession();
+        if (!session) return;
+
+        for (const source of session.inputSources) {
+            if (!source.gamepad) continue;
+            const axes = source.gamepad.axes;
+
+            // Linker Controller: Smooth Locomotion & Teleport
+            if (source.handedness === 'left') {
+                // Smooth Movement (Stick-Eingabe)
+                if (Math.abs(axes[3]) > 0.1 || Math.abs(axes[2]) > 0.1) {
+                    const direction = new THREE.Vector3();
+                    camera.getWorldDirection(direction);
+                    direction.y = 0;
+                    direction.normalize();
+                    
+                    const side = new THREE.Vector3().crossVectors(camera.up, direction).normalize();
+                    
+                    xrGroup.position.addScaledVector(direction, -axes[3] * moveSpeed);
+                    xrGroup.position.addScaledVector(side, axes[2] * moveSpeed);
+                }
+
+                // Teleportation (Joystick drücken nach vorne für Marker)
+                if (axes[3] < -0.6) {
+                    const tempMatrix = new THREE.Matrix4();
+                    tempMatrix.identity().extractRotation(controllerL.matrixWorld);
+                    raycaster.ray.origin.setFromMatrixPosition(controllerL.matrixWorld);
+                    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+                    const intersects = raycaster.intersectObjects(floorMeshes);
+                    if (intersects.length > 0) {
+                        teleportMarker.position.copy(intersects[0].point);
+                        teleportMarker.visible = true;
+                    }
+                } else if (teleportMarker.visible) {
+                    // Beamen beim Loslassen
+                    const camPos = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
+                    const offset = new THREE.Vector3().copy(teleportMarker.position).sub(camPos.setY(0));
+                    xrGroup.position.add(offset);
+                    teleportMarker.visible = false;
+                }
+            }
+
+            // Rechter Controller: Snap Turn
+            if (source.handedness === 'right') {
+                if (canSnapTurn && Math.abs(axes[2]) > 0.8) {
+                    const angle = axes[2] > 0 ? -Math.PI / 4 : Math.PI / 4;
+                    xrGroup.rotation.y += angle;
+                    canSnapTurn = false;
+                    setTimeout(() => { canSnapTurn = true; }, 300);
+                }
+            }
+        }
+    }
+
+    function handleInteraction() {
+        const intersects = raycaster.intersectObjects(scene.children, true);
+        if (intersects.length === 0) return;
+        const target = intersects[0].object;
+
+        if (target.userData.type === 'carousel') playgroundState.carouselSpeed += 0.2;
+        if (target.userData.type === 'seesaw') playgroundState.seesawTarget = (playgroundState.seesawTarget > 0) ? -0.3 : 0.3;
+        if (target.userData.type === 'newton_ball') playgroundState.newtonPower = 1.0;
+        
+        if (target.userData.type === 'kit_box' && !isCarrying) {
+            isCarrying = true; document.getElementById('status-msg').innerText = "Wähle einen Tisch."; return;
+        }
+        if (isCarrying && target.userData.type === 'table_top') {
+            currentTable = target.userData.pos; kitBox.position.copy(currentTable).setY(1.38);
+            isCarrying = false; assemblyStep = 2; document.getElementById('status-msg').innerText = "Klicke Box zum Auspacken!"; return;
+        }
+        if (target.userData.type === 'kit_box' && !isCarrying) { unpackKit(); return; }
+        
+        let p = target; while(p.parent && !p.userData.step) p = p.parent;
+        if(p.userData.step) tryAssemble(p);
+    }
+
     window.orderKit = function(type) {
         if (kitBox) scene.remove(kitBox);
         activeKitType = type; assemblyStep = 1;
         kitBox = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 1.2), new THREE.MeshStandardMaterial({ color: 0xd2b48c }));
         kitBox.position.set(-18, 1.4, 0); kitBox.userData = { type: 'kit_box' };
         scene.add(kitBox);
-        document.getElementById('status-msg').innerText = "Paket geliefert!";
     };
 
     function unpackKit() {
@@ -326,7 +446,7 @@
 
     function createCarParts(tx, tz) {
         const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.2, 0.8), new THREE.MeshStandardMaterial({color: 0xcc0000}));
-        chassis.position.set(tx-1, 1.3, tz); chassis.userData = { step: 1 }; scene.add(chassis); parts.push(chassis);
+        chassis.position.set(tx-1.5, 1.3, tz); chassis.userData = { step: 1 }; scene.add(chassis); parts.push(chassis);
         for(let i=0; i<2; i++){
             const a = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.1), new THREE.MeshStandardMaterial({color:0x444444}));
             a.rotation.x = Math.PI/2; a.position.set(tx, 1.3, tz+(i===0?0.5:-0.5)); a.userData = { step: 2+i }; scene.add(a); parts.push(a);
@@ -368,7 +488,6 @@
     function tryAssemble(part) {
         const step = part.userData.step; if (step !== assemblyStep) return;
         const tx = currentTable.x; const tz = currentTable.z;
-
         if (activeKitType === 'windmill') {
             if(step === 1) part.position.set(tx, 1.18, tz);
             if(step === 2) { part.rotation.z = 0; part.position.set(tx, 1.78, tz); }
@@ -381,18 +500,13 @@
             if(step === 8) part.position.set(tx, 1.45, tz);
             if(step === 9) part.position.set(tx, 1.6, tz);
             if(step === 10) { part.position.set(tx, 1.5, tz); showInfo("Solar-Auto", "Fertig! Das Solar-Panel wandelt Licht direkt in kinetische Energie für den Motor um."); }
-        } else if (activeKitType === 'chemistry') {
-            if(step === 1) part.position.set(tx, 1.18, tz);
-            if(step >= 2) part.position.set(tx-0.5 + (step-2)*0.5, 1.5, tz);
-            if(step === 4) showInfo("Chemie-Experiment", "Flüssigkeiten vorbereitet. Mische H2SO4 mit Wasser (Vorsicht: exotherm!)");
         } else if (activeKitType === 'fuelcell') {
             if(step === 1) part.position.set(tx, 1.18, tz);
             if(step === 2) part.position.set(tx-0.4, 1.5, tz-0.4);
             if(step === 3) part.position.set(tx-0.4, 1.5, tz+0.4);
             if(step === 4) part.position.set(tx, 1.5, tz);
-            if(step === 5) { part.position.set(tx, 1.9, tz); part.material.color.set(0x00ff00); showInfo("Brennstoffzelle", "Wandelt chemische Energie (H2 + O2) direkt in Strom um. Rückstand: Nur Wasser!"); }
+            if(step === 5) { part.position.set(tx, 1.9, tz); part.material.color.set(0x00ff00); showInfo("Brennstoffzelle", "Strom wird aus H2 und O2 erzeugt!"); }
         }
-
         assemblyStep++;
         document.getElementById('progress-fill').style.width = (assemblyStep/totalSteps * 100) + "%";
     }
@@ -401,89 +515,6 @@
         document.getElementById('overlay-title').innerText = title;
         document.getElementById('overlay-text').innerText = text;
         document.getElementById('info-overlay').style.display = 'block';
-    }
-
-    // --- VR NAVIGATION ---
-    function setupVR() {
-        controllerR = renderer.xr.getController(0);
-        controllerR.addEventListener('selectstart', () => {
-            const tempMatrix = new THREE.Matrix4();
-            tempMatrix.identity().extractRotation(controllerR.matrixWorld);
-            raycaster.ray.origin.setFromMatrixPosition(controllerR.matrixWorld);
-            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-            handleInteraction();
-        });
-        xrGroup.add(controllerR);
-
-        controllerL = renderer.xr.getController(1);
-        xrGroup.add(controllerL);
-
-        const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-10)]));
-        controllerR.add(line.clone()); 
-        controllerL.add(line.clone());
-    }
-
-    function handleVRInput() {
-        const session = renderer.xr.getSession();
-        if (!session) return;
-
-        for (const source of session.inputSources) {
-            if (!source.gamepad) continue;
-            const axes = source.gamepad.axes; // 2: X-Achse, 3: Y-Achse
-
-            // Linker Controller: Teleportation
-            if (source.handedness === 'left') {
-                if (axes[3] < -0.5) { // Stick nach vorne
-                    const tempMatrix = new THREE.Matrix4();
-                    tempMatrix.identity().extractRotation(controllerL.matrixWorld);
-                    raycaster.ray.origin.setFromMatrixPosition(controllerL.matrixWorld);
-                    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-                    const intersects = raycaster.intersectObjects(floorMeshes);
-                    if (intersects.length > 0) {
-                        teleportMarker.position.copy(intersects[0].point);
-                        teleportMarker.visible = true;
-                    }
-                } else if (teleportMarker.visible) {
-                    // Beim Loslassen des Sticks teleportieren
-                    const camPos = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
-                    const offset = new THREE.Vector3().copy(teleportMarker.position).sub(camPos.setY(0));
-                    xrGroup.position.add(offset);
-                    teleportMarker.visible = false;
-                }
-            }
-
-            // Rechter Controller: Snap Turn
-            if (source.handedness === 'right') {
-                if (canSnapTurn && Math.abs(axes[2]) > 0.8) {
-                    const angle = axes[2] > 0 ? -Math.PI / 4 : Math.PI / 4;
-                    xrGroup.rotation.y += angle;
-                    canSnapTurn = false;
-                    setTimeout(() => { canSnapTurn = true; }, 300)
-                }
-            }
-        }
-    }
-
-    function handleInteraction() {
-        const intersects = raycaster.intersectObjects(scene.children, true);
-        if (intersects.length === 0) return;
-        const target = intersects[0].object;
-
-        if (target.userData.type === 'carousel') playgroundState.carouselSpeed += 0.2;
-        if (target.userData.type === 'seesaw') playgroundState.seesawTarget = (playgroundState.seesawTarget > 0) ? -0.3 : 0.3;
-        if (target.userData.type === 'newton_ball') playgroundState.newtonPower = 1.0;
-        
-        if (target.userData.type === 'kit_box' && !isCarrying) {
-            isCarrying = true; document.getElementById('status-msg').innerText = "Wähle einen Tisch."; return;
-        }
-        if (isCarrying && target.userData.type === 'table_top') {
-            currentTable = target.userData.pos; kitBox.position.copy(currentTable).setY(1.38);
-            isCarrying = false; assemblyStep = 2; document.getElementById('status-msg').innerText = "Box öffnen!"; return;
-        }
-        if (target.userData.type === 'kit_box' && !isCarrying) { unpackKit(); return; }
-        
-        let p = target; while(p.parent && !p.userData.step) p = p.parent;
-        if(p.userData.step) tryAssemble(p);
     }
 
     function onMouseDown(event) {
