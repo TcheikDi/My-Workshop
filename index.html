@@ -26,8 +26,8 @@
 
 <div id="ui-container">
     <div class="panel">
-        <h1>High-Tech Forschungszentrum</h1>
-        <p><b>Showroom</b> links. <b>Science Park</b> durch die Tür in der Glasfront (rechts vom Eingang).</p>
+        <h1>VR Workshop & Science Playground</h1>
+        <p>Wähle im <b>Showroom</b> ein Paket, bringe es zu einem Tisch und baue es dort Schritt für Schritt. Draußen wartet der <b>Science Playground</b>.</p>
         <div class="kit-grid">
             <button onclick="orderKit('windmill')">Windmühle</button>
             <button onclick="orderKit('car')">Solar-Auto</button>
@@ -53,7 +53,7 @@
     </div>
 </div>
 
-<div id="status-msg">Architektur & Science Park stabilisiert. ✨</div>
+<div id="status-msg">Workshop bereit: Paket auswählen und losbauen. ✨</div>
 
 <script type="module">
     import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/webxr/VRButton.js';
@@ -100,6 +100,12 @@
     const labGroup = new THREE.Group();
     const showroomGroup = new THREE.Group();
     const parkGroup = new THREE.Group();
+    const kitBuildConfigs = {
+        windmill: { title: 'Windmühle', colors: [0x8ecae6, 0x219ebc, 0x023047] },
+        car: { title: 'Solar-Auto', colors: [0xfcbf49, 0xf77f00, 0xd62828] },
+        chemistry: { title: 'Chemie-Set', colors: [0x80ed99, 0x57cc99, 0x22577a] },
+        fuelcell: { title: 'Brennstoffzelle', colors: [0xffe66d, 0xff9f1c, 0x2ec4b6] }
+    };
 
     function init() {
         scene = new THREE.Scene();
@@ -134,7 +140,7 @@
     }
 
     function buildArchitecture() {
-        // Boden Außenbereich
+                // Boden Außenbereich
         const meadow = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), new THREE.MeshStandardMaterial({ color: 0x4d7a3d, roughness: 1 }));
         meadow.rotation.x = -Math.PI/2; meadow.receiveShadow = true; scene.add(meadow); floorMeshes.push(meadow);
 
@@ -292,23 +298,53 @@
     }
 
     // --- INTERACTION ---
-    window.orderKit = (type) => {
-        if (kitBox) scene.remove(kitBox); activeKitType = type; assemblyStep = 1;
+        window.orderKit = (type) => {
+        if (kitBox) scene.remove(kitBox);
+        activeKitType = type;
+        assemblyStep = 0;
+        currentTable = null;
+        isCarrying = false;
+        parts.forEach(p => scene.remove(p));
+        parts = [];
         kitBox = new THREE.Mesh(new THREE.BoxGeometry(1, 0.6, 1), new THREE.MeshStandardMaterial({ color: 0xd2b48c }));
         kitBox.position.set(-28.5, 1.4, 0); kitBox.userData = { type: 'kit_box' };
         scene.add(kitBox); interactiveObjects.push(kitBox);
         document.getElementById('ai-panel').style.display = 'block';
         document.getElementById('ai-content').innerText = "Paket geliefert. Bring es zum Tisch!";
+        document.getElementById('ai-ask-btn').style.display = 'block';
+        document.getElementById('assembly-panel').style.display = 'none';
+        document.getElementById('progress-fill').style.width = '0%';
+        document.getElementById('status-msg').innerText = 'Paket aufgenommen. Lege es auf einen freien Tisch.';
     };
+
+    function spawnBuildStep() {
+        if (!currentTable || !activeKitType) return;
+        const config = kitBuildConfigs[activeKitType] || kitBuildConfigs.windmill;
+        if (assemblyStep >= totalSteps) return;
+        const tx = currentTable.pos.x, tz = currentTable.pos.z, th = currentTable.pos.y;
+        const stepIndex = assemblyStep;
+        const color = config.colors[stepIndex];
+        const part = new THREE.Mesh(
+            new THREE.BoxGeometry(0.45 + stepIndex * 0.18, 0.2, 0.45 + stepIndex * 0.18),
+            new THREE.MeshStandardMaterial({ color })
+        );
+        part.position.set(tx, th + 0.12 + stepIndex * 0.18, tz);
+        part.userData = { step: stepIndex + 1 };
+        scene.add(part);
+        parts.push(part);
+        interactiveObjects.push(part);
+    }
 
     function unpackKit() {
         if (!currentTable) return;
-        scene.remove(kitBox); kitBox = null; assemblyStep = 1; parts.forEach(p => scene.remove(p)); parts = [];
-        const tx = currentTable.pos.x, tz = currentTable.pos.z, th = currentTable.pos.y;
+        scene.remove(kitBox); kitBox = null; assemblyStep = 0; parts.forEach(p => scene.remove(p)); parts = [];
+        const config = kitBuildConfigs[activeKitType] || kitBuildConfigs.windmill;
         document.getElementById('assembly-panel').style.display = 'block';
-        const d = new THREE.Mesh(new THREE.BoxGeometry(0.6,0.6,0.6), new THREE.MeshStandardMaterial({color:0x3498db}));
-        d.position.set(tx, th+0.3, tz); d.userData = { step: 1 }; scene.add(d); parts.push(d); interactiveObjects.push(d);
-        totalSteps = 1;
+        document.getElementById('kit-title').innerText = `${config.title} – Montage-Status`;
+        document.getElementById('progress-fill').style.width = '0%';
+        totalSteps = config.colors.length;
+        spawnBuildStep();
+        document.getElementById('status-msg').innerText = 'Bauteile bereit. Klicke die Teile, um den Aufbau abzuschließen.';
     }
 
     async function explainObject(name) {
@@ -367,13 +403,35 @@
         if (target.userData.type === 'science_object') { explainObject(target.userData.name); return; }
         if (target.userData.type === 'table_tablet') { window.getKitInstructions(); return; }
         if (target.userData.type === 'vr_order_btn') { orderKit(target.userData.kit); return; }
-        if (target.userData.type === 'kit_box') { if (!isCarrying && !currentTable) isCarrying = true; else if (!isCarrying && currentTable) unpackKit(); return; }
-        if (isCarrying && target.userData.type === 'table_top') { currentTable = target.userData; kitBox.position.copy(currentTable.pos).setY(currentTable.pos.y + 0.3); isCarrying = false; return; }
+        if (target.userData.type === 'kit_box') {
+            if (!isCarrying && !currentTable) {
+                isCarrying = true;
+                document.getElementById('status-msg').innerText = 'Paket wird getragen. Wähle einen Tisch.';
+            } else if (!isCarrying && currentTable) {
+                unpackKit();
+            }
+            return;
+        }
+        if (isCarrying && target.userData.type === 'table_top') {
+            currentTable = target.userData;
+            kitBox.position.copy(currentTable.pos).setY(currentTable.pos.y + 0.3);
+            isCarrying = false;
+            document.getElementById('status-msg').innerText = 'Paket abgelegt. Klicke das Paket zum Auspacken.';
+            return;
+        }
         let p = target; while(p.parent && !p.userData.step) p = p.parent;
         if(p && p.userData.step) {
-             const tx = currentTable.pos.x, tz = currentTable.pos.z, th = currentTable.pos.y;
-             p.position.set(tx, th+0.3, tz); assemblyStep++;
-             document.getElementById('progress-fill').style.width = "100%";
+             if (p.userData.step !== assemblyStep + 1) return;
+             assemblyStep++;
+             const progress = Math.round((assemblyStep / totalSteps) * 100);
+             document.getElementById('progress-fill').style.width = `${progress}%`;
+             p.material.emissive = new THREE.Color(0x2ecc71);
+             p.material.emissiveIntensity = 0.5;
+             if (assemblyStep >= totalSteps) {
+                document.getElementById('status-msg').innerText = 'Projekt abgeschlossen! Wähle gern ein neues Paket.';
+             } else {
+                spawnBuildStep();
+             }
         }
     }
 
