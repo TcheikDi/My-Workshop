@@ -20,6 +20,7 @@
         .ai-sparkle { color: #8e44ad; font-weight: bold; }
         .loading-spinner { display: inline-block; width: 15px; height: 15px; border: 2px solid rgba(142, 68, 173, 0.3); border-radius: 50%; border-top-color: #8e44ad; animation: spin 1s ease-in-out infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        input[type="text"] { width: calc(100% - 10px); padding: 5px; border-radius: 4px; border: 1px solid #ccc; margin-bottom: 5px; font-size: 0.8rem; }
     </style>
 </head>
 <body>
@@ -27,13 +28,14 @@
 <div id="ui-container">
     <div class="panel">
         <h1>Labor Forschungs-Zentrum</h1>
-        <p><b>Showroom</b> links für Bestellungen. <br><b>Science Park</b> durch die Glastür rechts.</p>
+        <p><b>Showroom</b> links. <b>Science Park</b> durch die Glastür rechts.</p>
         <div class="kit-grid">
             <button onclick="orderKit('windmill')">Windmühle</button>
             <button onclick="orderKit('car')">Solar-Auto</button>
             <button onclick="orderKit('chemistry')">Chemie-Set</button>
             <button onclick="orderKit('fuelcell')">Brennstoffzelle</button>
         </div>
+        <button onclick="generateExperimentIdea()" style="margin-top:10px; width:100%; background:#27ae60;">✨ Experiment-Idee ✨</button>
     </div>
     
     <div id="assembly-panel" class="panel" style="display:none;">
@@ -48,6 +50,8 @@
         <div id="ai-content" style="max-height: 250px; overflow-y: auto; font-size: 0.85rem; margin-bottom: 10px; line-height: 1.4;">
             Klicke auf die Rutsche oder andere Geräte für physikalische Erklärungen.
         </div>
+        <input type="text" id="user-question" placeholder="Frage an den Mentor...">
+        <button onclick="askCustomQuestion()" style="width:100%; background:#8e44ad; margin-bottom:5px;">✨ Frage stellen ✨</button>
         <div id="ai-status" style="font-size: 0.7rem; color: #888; margin-bottom: 5px;">Bereit...</div>
     </div>
 </div>
@@ -57,39 +61,115 @@
 <script type="module">
     import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/webxr/VRButton.js';
 
-    // --- Gemini API Setup ---
+    // ==========================================
+    // 1. GEMINI API SETUP & LOGIC
+    // ==========================================
     const apiKey = ""; 
     const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025";
     const TTS_MODEL = "gemini-2.5-flash-preview-tts";
 
-    async function generateAIText(prompt) {
+    // Exponential Backoff Fetch
+    async function fetchWithRetry(url, options, retries = 5, delay = 1000) {
+        for (let i = 0; i < retries; i++) {
+            try {
+                const response = await fetch(url, options);
+                if (response.ok) return await response.json();
+            } catch (err) {}
+            await new Promise(r => setTimeout(r, delay));
+            delay *= 2;
+        }
+        throw new Error("API Anfrage fehlgeschlagen");
+    }
+
+    async function generateAIText(prompt, systemMsg = "Du bist ein KI-Mentor in einem Forschungszentrum.") {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-        const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: "Du bist ein KI-Mentor in einem Forschungszentrum." }] } };
-        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        const result = await res.json();
-        return result.candidates?.[0]?.content?.parts?.[0]?.text || "Fehler.";
+        const payload = { 
+            contents: [{ parts: [{ text: prompt }] }], 
+            systemInstruction: { parts: [{ text: systemMsg }] } 
+        };
+        const result = await fetchWithRetry(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        return result.candidates?.[0]?.content?.parts?.[0]?.text || "Ich konnte leider keine Antwort finden.";
     }
 
     async function speakText(text) {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${TTS_MODEL}:generateContent?key=${apiKey}`;
-        const payload = { contents: [{ parts: [{ text: `Lies kurz vor: ${text}` }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } } } } };
-        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        const result = await res.json();
-        const base64Audio = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
-        if (base64Audio) playAudio(base64Audio);
+        const payload = { 
+            contents: [{ parts: [{ text: `Sage freundlich und kompetent: ${text}` }] }], 
+            generationConfig: { 
+                responseModalities: ["AUDIO"], 
+                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } } } 
+            } 
+        };
+        try {
+            const result = await fetchWithRetry(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const base64Audio = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
+            if (base64Audio) playAudio(base64Audio);
+        } catch(e) { console.error("TTS Fehler", e); }
     }
 
     function playAudio(base64) {
-        const binaryString = atob(base64);
-        const bytes = new Int16Array(binaryString.length / 2);
-        for (let i = 0; i < binaryString.length; i += 2) bytes[i/2] = (binaryString.charCodeAt(i+1) << 8) | binaryString.charCodeAt(i);
-        const ctx = new AudioContext();
+        const binary = atob(base64);
+        const len = binary.length;
+        const bytes = new Int16Array(len / 2);
+        for (let i = 0; i < len; i += 2) bytes[i/2] = (binary.charCodeAt(i+1) << 8) | binary.charCodeAt(i);
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
         const buffer = ctx.createBuffer(1, bytes.length, 24000);
         buffer.getChannelData(0).set(Array.from(bytes).map(v => v / 32768));
         const src = ctx.createBufferSource(); src.buffer = buffer; src.connect(ctx.destination); src.start();
     }
 
-    // --- Three.js Logik ---
+    // AI Functions for UI
+    window.askCustomQuestion = async () => {
+        const q = document.getElementById('user-question').value;
+        if (!q) return;
+        setAIStatus("Denke nach...");
+        const response = await generateAIText(q);
+        updateAIContent("Frage: " + q, response);
+        speakText(response);
+        setAIStatus("Bereit.");
+        document.getElementById('user-question').value = "";
+    };
+
+    window.generateExperimentIdea = async () => {
+        setAIStatus("Generiere Idee...");
+        const prompt = "Schlage ein kurzes, kreatives Experiment vor, das man in diesem Labor mit dem Solar-Auto und der Rutsche draußen machen könnte.";
+        const response = await generateAIText(prompt);
+        updateAIContent("✨ Neue Experiment-Idee ✨", response);
+        speakText(response);
+        setAIStatus("Bereit.");
+    };
+
+    async function explainObject(name) {
+        setAIStatus("Analysiere " + name + "...");
+        const prompt = `Erkläre kurz (max 2 Sätze) die Physik hinter einer ${name} auf einem Spielplatz.`;
+        const response = await generateAIText(prompt);
+        updateAIContent("Wissenschaft: " + name, response);
+        speakText(response);
+        setAIStatus("Bereit.");
+    }
+
+    window.getKitInstructions = async () => {
+        if (!activeKitType) return;
+        setAIStatus("Erstelle Plan...");
+        const prompt = `Erstelle eine kurze Bauanleitung (3 Schritte) für das Projekt: ${activeKitType}.`;
+        const response = await generateAIText(prompt);
+        updateAIContent("Anleitung: " + activeKitType, response);
+        speakText(response);
+        setAIStatus("Bereit.");
+    };
+
+    function updateAIContent(title, body) {
+        document.getElementById('ai-panel').style.display = 'block';
+        document.getElementById('ai-content').innerHTML = `<strong>${title}</strong><br><br>${body.replace(/\n/g, "<br>")}`;
+    }
+
+    function setAIStatus(msg) {
+        document.getElementById('ai-status').innerHTML = msg.includes("...") ? `<div class="loading-spinner"></div> ${msg}` : msg;
+    }
+
+    // ==========================================
+    // 2. THREE.JS ENGINE & ARCHITECTURE
+    // ==========================================
     let scene, camera, renderer, raycaster, mouse, controls, xrGroup, controllerR, controllerL, teleportMarker;
     let tables = [], parts = [], floorMeshes = [], interactiveObjects = [];
     let isCarrying = false, currentTable = null, activeKitType = null, assemblyStep = 0, totalSteps = 0;
@@ -147,16 +227,16 @@
         const ceil = new THREE.Mesh(new THREE.PlaneGeometry(labW, labD), new THREE.MeshStandardMaterial({ color: 0xffffff }));
         ceil.rotation.x = Math.PI/2; ceil.position.y = wallH; labGroup.add(ceil);
 
-        // Rückwand & Seitenwand Rechts
+        // Wände
         const wallB = new THREE.Mesh(new THREE.BoxGeometry(labW, wallH, 0.5), wallMat); wallB.position.set(0, wallH/2, labD/2); labGroup.add(wallB);
         const wallR = new THREE.Mesh(new THREE.BoxGeometry(0.5, wallH, labD), wallMat); wallR.position.set(labW/2, wallH/2, 0); labGroup.add(wallR);
 
-        // Linke Wand (Anschluss Showroom)
+        // Verbindung Showroom
         const wallL1 = new THREE.Mesh(new THREE.BoxGeometry(0.5, wallH, 10), wallMat); wallL1.position.set(-labW/2, wallH/2, 12.5); labGroup.add(wallL1);
         const wallL2 = new THREE.Mesh(new THREE.BoxGeometry(0.5, wallH, 10), wallMat); wallL2.position.set(-labW/2, wallH/2, -12.5); labGroup.add(wallL2);
         const wallL3 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 2, 15), wallMat); wallL3.position.set(-labW/2, 5, 0); labGroup.add(wallL3);
 
-        // Showroom-Bau
+        // Showroom-Bau (Fixiert)
         const shopSize = 15; const shopX = -labW/2 - shopSize/2;
         scene.add(showroomGroup);
         const sFloor = new THREE.Mesh(new THREE.PlaneGeometry(shopSize, shopSize), new THREE.MeshStandardMaterial({ color: 0x333 }));
@@ -174,27 +254,20 @@
             showroomGroup.add(btn); interactiveObjects.push(btn);
         });
 
-        // --- GLASFRONT MIT TÜR (VORNE) ---
+        // --- GLASFRONT MIT TÜR (Fixiert) ---
         const frameMat = new THREE.MeshStandardMaterial({ color: 0x222, metalness: 0.8 });
         const glassMat = new THREE.MeshStandardMaterial({ color: 0xaaddff, transparent: true, opacity: 0.2, side: THREE.DoubleSide });
-        
         const bF = new THREE.Mesh(new THREE.BoxGeometry(labW, 0.4, 0.6), frameMat); bF.position.set(0, 0.2, -labD/2); labGroup.add(bF);
         const tF = new THREE.Mesh(new THREE.BoxGeometry(labW, 0.4, 0.6), frameMat); tF.position.set(0, wallH - 0.2, -labD/2); labGroup.add(tF);
 
-        // Glas Segmente (Links und Rechts)
         const gL = new THREE.Mesh(new THREE.PlaneGeometry(15, wallH-0.6), glassMat); gL.position.set(-12.5, wallH/2, -labD/2 + 0.01); labGroup.add(gL);
         const gR = new THREE.Mesh(new THREE.PlaneGeometry(20, wallH-0.6), glassMat); gR.position.set(10, wallH/2, -labD/2 + 0.01); labGroup.add(gR);
-        
-        // Türöffnung (bei X = -5)
         const pL = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3.5, 0.6), frameMat); pL.position.set(-5, 1.75, -labD/2); labGroup.add(pL);
         const pR = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3.5, 0.6), frameMat); pR.position.set(-2, 1.75, -labD/2); labGroup.add(pR);
         const pT = new THREE.Mesh(new THREE.BoxGeometry(3.3, 0.3, 0.6), frameMat); pT.position.set(-3.5, 3.5, -labD/2); labGroup.add(pT);
 
-        // Tische generieren
         for (let i = 0; i < 4; i++) {
-            for (let j = 0; j < 5; j++) {
-                createCompleteTable(labGroup, (i*8)-12, (j*6)-12);
-            }
+            for (let j = 0; j < 5; j++) { createCompleteTable(labGroup, (i*8)-12, (j*6)-12); }
         }
 
         buildSciencePark();
@@ -207,14 +280,13 @@
         plate.position.y = 0.8; plate.userData = { type: 'table_top', pos: new THREE.Vector3(x, 0.8, z) };
         group.add(plate); tables.push(plate); interactiveObjects.push(plate);
 
-        // Tischbeine
+        // Tischbeine (Fixiert)
         const legMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
         const legGeo = new THREE.BoxGeometry(0.12, 0.8, 0.12);
         [[1.6, 0.4, 0.85], [-1.6, 0.4, 0.85], [1.6, 0.4, -0.85], [-1.6, 0.4, -0.85]].forEach(p => {
             const leg = new THREE.Mesh(legGeo, legMat); leg.position.set(p[0], p[1], p[2]); group.add(leg);
         });
 
-        // 2 Stühle pro Tisch
         for(let s=0; s<2; s++) {
             const chair = new THREE.Group();
             const mat = new THREE.MeshStandardMaterial({color: 0x222});
@@ -237,32 +309,25 @@
         area.rotation.x = -Math.PI/2; area.position.set(0, 0.01, -110); scene.add(area); floorMeshes.push(area);
         scene.add(parkGroup);
 
-        // --- RUTSCHE (REALISTISCH) ---
+        // --- RUTSCHE (NEU KONSTRUIERT) ---
         const slide = new THREE.Group();
         const woodMat = new THREE.MeshStandardMaterial({ color: 0x5b3a29 });
         const metalMat = new THREE.MeshStandardMaterial({ color: 0xcc0000, metalness: 0.6, roughness: 0.2 });
-
-        // Leiter & Podest
         const ladderL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 5, 0.1), woodMat); ladderL.position.set(-0.7, 2.5, 0); slide.add(ladderL);
         const ladderR = ladderL.clone(); ladderR.position.set(0.7, 2.5, 0); slide.add(ladderR);
         for(let i=0; i<8; i++){
             const step = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.05, 0.2), woodMat); step.position.set(0, i*0.6, -0.1); slide.add(step);
         }
         const platform = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.1, 1.5), woodMat); platform.position.set(0, 4.8, -0.75); slide.add(platform);
-
-        // Rutschfläche
         const sPlank = new THREE.Mesh(new THREE.BoxGeometry(1.5, 12, 0.15), metalMat);
         sPlank.position.set(0, 2.4, -6); sPlank.rotation.x = -0.42; 
         sPlank.userData = { type: 'science_object', name: 'Rutsche' };
         slide.add(sPlank); interactiveObjects.push(sPlank);
-
-        // Seitenwangen der Rutsche
         const sideL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 12, 0.6), woodMat); sideL.position.set(-0.75, 2.6, -6); sideL.rotation.x = -0.42; slide.add(sideL);
         const sideR = sideL.clone(); sideR.position.set(0.75, 2.6, -6); slide.add(sideR);
-
         slide.position.set(20, 0, -80); parkGroup.add(slide);
 
-        // --- SCHAUKEL (REALISTISCH) ---
+        // --- SCHAUKEL ---
         const swing = new THREE.Group();
         const beam = new THREE.Mesh(new THREE.BoxGeometry(8, 0.3, 0.3), woodMat); beam.position.y = 5.5; swing.add(beam);
         [[4, 2.7, 2], [4, 2.7, -2], [-4, 2.7, 2], [-4, 2.7, -2]].forEach(p => {
@@ -271,7 +336,7 @@
             swing.add(leg);
         });
         const seat = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.1, 0.6), new THREE.MeshStandardMaterial({color: 0x222}));
-        seat.position.set(0, 1.2, 0); seat.userData = { type: 'science_object', name: 'Schaukel' };
+        seat.position.y = 1.2; seat.userData = { type: 'science_object', name: 'Schaukel' };
         swing.add(seat); interactiveObjects.push(seat);
         swing.position.set(-20, 0, -80); parkGroup.add(swing);
 
@@ -305,13 +370,14 @@
         }
     }
 
-    // --- INTERACTION ---
+    // --- INTERACTION LOGIC ---
     window.orderKit = (type) => {
         if (kitBox) scene.remove(kitBox); activeKitType = type; assemblyStep = 1;
         kitBox = new THREE.Mesh(new THREE.BoxGeometry(1, 0.6, 1), new THREE.MeshStandardMaterial({ color: 0xd2b48c }));
         kitBox.position.set(-28.5, 1.4, 0); kitBox.userData = { type: 'kit_box' };
         scene.add(kitBox); interactiveObjects.push(kitBox);
-        document.getElementById('ai-panel').style.display = 'block';
+        updateAIContent("Neuer Auftrag", `Du hast "${type}" bestellt. Bring das Paket zu einem Tisch und öffne es.`);
+        speakText(`Paket für ${type} geliefert.`);
     };
 
     function unpackKit() {
@@ -322,17 +388,7 @@
         const d = new THREE.Mesh(new THREE.BoxGeometry(0.6,0.6,0.6), new THREE.MeshStandardMaterial({color:0x3498db}));
         d.position.set(tx, th+0.3, tz); d.userData = { step: 1 }; scene.add(d); parts.push(d); interactiveObjects.push(d);
         totalSteps = 1;
-    }
-
-    async function explainObject(name) {
-        const contentDiv = document.getElementById('ai-content');
-        const statusDiv = document.getElementById('ai-status');
-        document.getElementById('ai-panel').style.display = 'block';
-        statusDiv.innerHTML = '<div class="loading-spinner"></div> Analysiere...';
-        const text = await generateAIText(`Erkläre kurz die Physik von ${name} auf einem Spielplatz.`);
-        contentDiv.innerHTML = `<strong>Wissenschaft: ${name}</strong><br>${text}`;
-        await speakText(text);
-        statusDiv.innerText = "Bereit.";
+        updateAIContent("Projektstart", "Klicke auf das Tablet am Tisch für deine ✨ Bauanleitung ✨.");
     }
 
     function setupVR() {
@@ -372,11 +428,7 @@
         if (hits.length === 0) return;
         const target = hits[0].object;
         if (target.userData.type === 'science_object') { explainObject(target.userData.name); return; }
-        if (target.userData.type === 'table_tablet') { 
-            document.getElementById('ai-panel').style.display = 'block';
-            document.getElementById('ai-content').innerText = "Anleitung wird geladen...";
-            return; 
-        }
+        if (target.userData.type === 'table_tablet') { window.getKitInstructions(); return; }
         if (target.userData.type === 'vr_order_btn') { orderKit(target.userData.kit); return; }
         if (target.userData.type === 'kit_box') { if (!isCarrying && !currentTable) isCarrying = true; else if (!isCarrying && currentTable) unpackKit(); return; }
         if (isCarrying && target.userData.type === 'table_top') { currentTable = target.userData; kitBox.position.copy(currentTable.pos).setY(currentTable.pos.y + 0.3); isCarrying = false; return; }
