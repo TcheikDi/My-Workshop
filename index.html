@@ -4,8 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Meta-Labor: Pro Forschungszentrum & Physik-Park</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background-color: #1a1a1a; }
         #ui-container { position: absolute; top: 20px; left: 20px; z-index: 10; pointer-events: none; }
@@ -20,18 +18,27 @@
         .loading-spinner { display: inline-block; width: 15px; height: 15px; border: 2px solid rgba(142, 68, 173, 0.3); border-radius: 50%; border-top-color: #8e44ad; animation: spin 1s ease-in-out infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
     </style>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
 </head>
 <body>
 
 <div id="ui-container">
     <div class="panel">
         <h1>High-Tech Forschungszentrum</h1>
-        <p><b>Showroom</b> links für Bestellungen.<br><b>Science Park</b> durch die Türöffnung rechts.</p>
+        <p><b>Showroom</b> links (Bestellungen).<br><b>Science Park</b> rechts (Spielplatz).</p>
         <div class="kit-grid">
-            <button onclick="orderKit('windmill')">Windmühle</button>
-            <button onclick="orderKit('car')">Solar-Auto</button>
-            <button onclick="orderKit('chemistry')">Chemie-Set</button>
-            <button onclick="orderKit('fuelcell')">Brennstoffzelle</button>
+            <button id="btn-windmill">Windmühle</button>
+            <button id="btn-car">Solar-Auto</button>
+            <button id="btn-chem">Chemie-Set</button>
+            <button id="btn-fuel">Brennstoffzelle</button>
         </div>
     </div>
     
@@ -52,7 +59,10 @@
 </div>
 
 <script type="module">
-    import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/webxr/VRButton.js';
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { VRButton } from 'three/addons/webxr/VRButton.js';
+    import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
     // ==========================================
     // 1. KI & API LOGIK (GEMINI)
@@ -64,18 +74,22 @@
     async function generateAIText(prompt) {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
         const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: "Du bist ein KI-Mentor in einem Forschungszentrum." }] } };
-        const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        const result = await response.json();
-        return result.candidates?.[0]?.content?.parts?.[0]?.text || "Fehler bei der Anfrage.";
+        try {
+            const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const result = await response.json();
+            return result.candidates?.[0]?.content?.parts?.[0]?.text || "Fehler bei der KI-Anfrage.";
+        } catch(e) { return "KI-Dienst nicht verfügbar."; }
     }
 
     async function speakText(text) {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${TTS_MODEL}:generateContent?key=${apiKey}`;
         const payload = { contents: [{ parts: [{ text: `Erkläre kurz: ${text}` }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } } } } };
-        const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        const result = await response.json();
-        const base64Audio = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
-        if (base64Audio) playAudio(base64Audio);
+        try {
+            const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const result = await response.json();
+            const base64Audio = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
+            if (base64Audio) playAudio(base64Audio);
+        } catch(e) { console.error("TTS failed"); }
     }
 
     function playAudio(base64Data) {
@@ -92,11 +106,11 @@
     // 2. THREE.JS ENGINE SETUP
     // ==========================================
     let scene, camera, renderer, raycaster, mouse, controls, xrGroup;
-    let controllerR, controllerL, teleportMarker;
-    let tables = [], interactiveObjects = [], floorMeshes = [];
+    let controller1, controller2, controllerGrip1, controllerGrip2;
+    let interactiveObjects = [], floorMeshes = [], tables = [], parts = [];
     let isCarrying = false, kitBox = null, currentTable = null, activeKitType = null;
-    let assemblyStep = 0, totalSteps = 1;
-    const moveSpeed = 0.08;
+    let canSnapTurn = true;
+    const moveSpeed = 0.12;
 
     function init() {
         scene = new THREE.Scene();
@@ -118,13 +132,12 @@
         document.body.appendChild(renderer.domElement);
         document.body.appendChild(VRButton.createButton(renderer));
 
-        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls = new OrbitControls(camera, renderer.domElement);
         controls.target.set(0, 1.6, 0);
 
         raycaster = new THREE.Raycaster();
         mouse = new THREE.Vector2();
 
-        // Beleuchtung
         scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.8));
         const sun = new THREE.DirectionalLight(0xffffff, 1.0);
         sun.position.set(50, 100, 50);
@@ -135,23 +148,61 @@
         buildEnvironment();
         buildArchitecture();
         buildSciencePark();
-        setupVR();
+        setupVRControllers();
 
         window.addEventListener('resize', onWindowResize);
         window.addEventListener('mousedown', onMouseDown);
         window.addEventListener('mousemove', onMouseMove);
+
+        document.getElementById('btn-windmill').onclick = () => orderKit('windmill');
+        document.getElementById('btn-car').onclick = () => orderKit('car');
+        document.getElementById('btn-chem').onclick = () => orderKit('chemistry');
+        document.getElementById('btn-fuel').onclick = () => orderKit('fuelcell');
         
         renderer.setAnimationLoop(animate);
     }
 
+    function setupVRControllers() {
+        controller1 = renderer.xr.getController(0);
+        controller1.addEventListener('selectstart', onSelectStart);
+        xrGroup.add(controller1);
+
+        controller2 = renderer.xr.getController(1);
+        controller2.addEventListener('selectstart', onSelectStart);
+        xrGroup.add(controller2);
+
+        const controllerModelFactory = new XRControllerModelFactory();
+        controllerGrip1 = renderer.xr.getControllerGrip(0);
+        controllerGrip1.add(controllerModelFactory.createControllerModel(controllerGrip1));
+        xrGroup.add(controllerGrip1);
+
+        controllerGrip2 = renderer.xr.getControllerGrip(1);
+        controllerGrip2.add(controllerModelFactory.createControllerModel(controllerGrip2));
+        xrGroup.add(controllerGrip2);
+
+        const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -10)]);
+        const line = new THREE.Line(geometry);
+        line.name = 'line';
+        controller1.add(line.clone());
+        controller2.add(line.clone());
+    }
+
+    function onSelectStart(event) {
+        const controller = event.target;
+        const tempMatrix = new THREE.Matrix4();
+        tempMatrix.identity().extractRotation(controller.matrixWorld);
+        raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+        raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+        handleInteraction();
+    }
+
     // ==========================================
-    // 3. ARCHITEKTUR & KOLLISION
+    // 3. ARCHITEKTUR & MÖBEL
     // ==========================================
     function buildArchitecture() {
         const wallH = 6, labW = 40, labD = 35;
         const wallMat = new THREE.MeshStandardMaterial({ color: 0xf5f6f7 });
         
-        // Boden & Decke
         const floor = new THREE.Mesh(new THREE.PlaneGeometry(labW, labD), new THREE.MeshStandardMaterial({ color: 0x222222 }));
         floor.rotation.x = -Math.PI / 2; floor.position.y = 0.01; floor.receiveShadow = true;
         scene.add(floor); floorMeshes.push(floor);
@@ -159,19 +210,16 @@
         const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(labW, labD), new THREE.MeshStandardMaterial({ color: 0xffffff }));
         ceiling.rotation.x = Math.PI / 2; ceiling.position.y = wallH; scene.add(ceiling);
 
-        // Wände (Solid)
         const wallBack = new THREE.Mesh(new THREE.BoxGeometry(labW, wallH, 0.5), wallMat);
         wallBack.position.set(0, wallH/2, labD/2); scene.add(wallBack);
         
         const wallRight = new THREE.Mesh(new THREE.BoxGeometry(0.5, wallH, labD), wallMat);
         wallRight.position.set(labW/2, wallH/2, 0); scene.add(wallRight);
 
-        // Trennwand Showroom (Links)
         const wallLeftA = new THREE.Mesh(new THREE.BoxGeometry(0.5, wallH, 10), wallMat); wallLeftA.position.set(-labW/2, wallH/2, 12.5); scene.add(wallLeftA);
         const wallLeftB = new THREE.Mesh(new THREE.BoxGeometry(0.5, wallH, 10), wallMat); wallLeftB.position.set(-labW/2, wallH/2, -12.5); scene.add(wallLeftB);
         const wallLeftTop = new THREE.Mesh(new THREE.BoxGeometry(0.5, 2.5, 15), wallMat); wallLeftTop.position.set(-labW/2, 4.75, 0); scene.add(wallLeftTop);
 
-        // Showroom-Raum
         const shopSize = 15; const shopX = -labW/2 - shopSize/2;
         const sFloor = new THREE.Mesh(new THREE.PlaneGeometry(shopSize, shopSize), new THREE.MeshStandardMaterial({ color: 0x333 }));
         sFloor.rotation.x = -Math.PI/2; sFloor.position.set(shopX, 0.02, 0); scene.add(sFloor); floorMeshes.push(sFloor);
@@ -194,28 +242,19 @@
             scene.add(btn); interactiveObjects.push(btn);
         });
 
-        // --- GLASFRONT MIT TÜR ---
         const frameMat = new THREE.MeshStandardMaterial({ color: 0x222, metalness: 0.8 });
-        const glassMat = new THREE.MeshStandardMaterial({ color: 0xaaddff, transparent: true, opacity: 0.2, side: THREE.DoubleSide });
-        
-        // Rahmen oben/unten
+        const glassMat = new THREE.MeshStandardMaterial({ color: 0xaaddff, transparent: true, opacity: 0.15, side: THREE.DoubleSide });
         const bF = new THREE.Mesh(new THREE.BoxGeometry(labW, 0.4, 0.6), frameMat); bF.position.set(0, 0.2, -labD/2); scene.add(bF);
         const tF = new THREE.Mesh(new THREE.BoxGeometry(labW, 0.4, 0.6), frameMat); tF.position.set(0, wallH-0.2, -labD/2); scene.add(tF);
-
-        // Glas-Elemente (Links und Mitte-Rechts)
         const gL = new THREE.Mesh(new THREE.PlaneGeometry(15, wallH-0.8), glassMat); gL.position.set(-12.5, wallH/2, -labD/2 + 0.05); scene.add(gL);
         const gR = new THREE.Mesh(new THREE.PlaneGeometry(20, wallH-0.8), glassMat); gR.position.set(10, wallH/2, -labD/2 + 0.05); scene.add(gR);
-
-        // Türpfosten (Echte Öffnung)
         const pL = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3.5, 0.6), frameMat); pL.position.set(-5, 1.75, -labD/2); scene.add(pL);
         const pR = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3.5, 0.6), frameMat); pR.position.set(-1.5, 1.75, -labD/2); scene.add(pR);
         const pT = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.3, 0.6), frameMat); pT.position.set(-3.25, 3.5, -labD/2); scene.add(pT);
 
-        // Tische & Stühle (Modulare Platzierung)
         for (let i = 0; i < 4; i++) {
             for (let j = 0; j < 5; j++) {
-                const tx = (i * 8) - 12; const tz = (j * 6) - 12;
-                buildCompleteTable(tx, tz);
+                buildCompleteTable((i * 8) - 12, (j * 6) - 12);
             }
         }
     }
@@ -224,16 +263,14 @@
         const group = new THREE.Group();
         const plate = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.1, 2.0), new THREE.MeshStandardMaterial({ color: 0xffffff }));
         plate.position.y = 0.8; plate.userData = { type: 'table_top', pos: new THREE.Vector3(x, 0.8, z) };
-        group.add(plate); tables.push(plate); interactiveObjects.push(plate);
+        group.add(plate); interactiveObjects.push(plate);
 
-        // Beine (Vier Stück)
         const legGeo = new THREE.BoxGeometry(0.12, 0.8, 0.12);
         const legMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
         [[1.6, 0.4, 0.85], [-1.6, 0.4, 0.85], [1.6, 0.4, -0.85], [-1.6, 0.4, -0.85]].forEach(p => {
             const leg = new THREE.Mesh(legGeo, legMat); leg.position.set(p[0], p[1], p[2]); group.add(leg);
         });
 
-        // 2 Stühle pro Tisch
         for(let s=0; s<2; s++) {
             const chair = new THREE.Group();
             const mat = new THREE.MeshStandardMaterial({color: 0x222});
@@ -247,70 +284,67 @@
         }
 
         const tablet = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.02, 0.2), new THREE.MeshStandardMaterial({ color: 0x111 }));
-        tablet.position.set(1.2, 0.86, 0.6); tablet.userData = { type: 'table_tablet' }; group.add(tablet); interactiveObjects.push(tablet);
+        tablet.position.set(1.2, 0.86, 0.6); tablet.userData = { type: 'table_tablet' }; 
+        group.add(tablet); interactiveObjects.push(tablet);
 
         group.position.set(x, 0, z); scene.add(group);
     }
 
     // ==========================================
-    // 4. SCIENCE PARK (KONSTRUKTION FIX)
+    // 4. SCIENCE PARK (WIEDERHERGESTELLT)
     // ==========================================
     function buildSciencePark() {
         const area = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0xc2b280 }));
-        area.rotation.x = -Math.PI/2; area.position.set(0, 0.01, -110); scene.add(area); floorMeshes.push(area);
+        area.rotation.x = -Math.PI/2; area.position.set(0, 0, -110); scene.add(area); floorMeshes.push(area);
 
-        // --- RUTSCHE (NEU: LEITER RICHTUNG PLATTFORM) ---
-        const slide = new THREE.Group();
-        const metalMat = new THREE.MeshStandardMaterial({ color: 0xcc0000, metalness: 0.6, roughness: 0.2 });
         const woodMat = new THREE.MeshStandardMaterial({ color: 0x5b3a29 });
+        const metalMat = new THREE.MeshStandardMaterial({ color: 0xcc0000, metalness: 0.7, roughness: 0.1 });
 
-        // Leiter
-        const ladderL = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 5), woodMat); ladderL.position.set(-0.75, 2.5, 0); slide.add(ladderL);
-        const ladderR = ladderL.clone(); ladderR.position.set(0.75, 2.5, 0); slide.add(ladderR);
-        for(let i=0; i<8; i++) {
-            const step = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.05, 0.2), woodMat); step.position.y = i*0.6 + 0.3; slide.add(step);
+        // --- RUTSCHE ---
+        const slide = new THREE.Group();
+        const h = 4.0;
+        // Leiter & Plattform
+        const platform = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.15, 1.8), woodMat); platform.position.set(0, h, -0.4); slide.add(platform);
+        const legGeo = new THREE.CylinderGeometry(0.06, 0.06, h + 0.5);
+        [[0.8, 0.5], [-0.8, 0.5]].forEach(p => {
+            const leg = new THREE.Mesh(legGeo, woodMat); leg.position.set(p[0], h/2, p[1]); leg.rotation.x = -0.2; slide.add(leg);
+        });
+        for(let i=0; i<7; i++) {
+            const step = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.05, 0.2), woodMat);
+            const py = i * (h/7) + 0.3; step.position.set(0, py, 0.5 + (py/h)*-0.5); slide.add(step);
         }
-        // Plattform oben
-        const platform = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.1, 1.6), woodMat); platform.position.set(0, 4.8, -0.8); slide.add(platform);
-
-        // Gleitfläche (Geneigt weg von der Leiter)
-        const slideSurface = new THREE.Mesh(new THREE.BoxGeometry(1.6, 12, 0.15), metalMat);
-        slideSurface.position.set(0, 2.4, -6.5); slideSurface.rotation.x = -0.42; 
-        slideSurface.userData = { type: 'science_object', name: 'Rutsche' };
-        slide.add(slideSurface); interactiveObjects.push(slideSurface);
-
-        // Seitenwangen
-        const sideL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 12, 0.6), woodMat); sideL.position.set(-0.8, 2.6, -6.5); sideL.rotation.x = -0.42; slide.add(sideL);
-        const sideR = sideL.clone(); sideR.position.set(0.8, 2.6, -6.5); slide.add(sideR);
-
+        // Rutschfläche
+        const slideLen = 9.0; const angle = 0.55; 
+        const surface = new THREE.Mesh(new THREE.BoxGeometry(1.6, slideLen, 0.15), metalMat);
+        surface.position.set(0, h/2, -1.3 - (slideLen/2 * Math.sin(angle))); surface.rotation.x = -1.57 + angle;
+        surface.userData = { type: 'science_object', name: 'Rutsche' };
+        slide.add(surface); interactiveObjects.push(surface);
         slide.position.set(20, 0, -80); scene.add(slide);
 
-        // --- SCHAUKEL (NEU: STÄBE VERBUNDEN & SEILE) ---
+        // --- SCHAUKEL ---
         const swing = new THREE.Group();
         const beam = new THREE.Mesh(new THREE.BoxGeometry(8, 0.3, 0.3), woodMat); beam.position.y = 5.5; swing.add(beam);
-        // A-Rahmen Beine (Fixiert)
-        [[3.8, 2.7, 2], [3.8, 2.7, -2], [-3.8, 2.7, 2], [-3.8, 2.7, -2]].forEach(p => {
+        [[3.8, 2], [3.8, -2], [-3.8, 2], [-3.8, -2]].forEach(p => {
             const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 6.5, 0.2), woodMat);
-            leg.position.set(p[0], p[1], p[2]); leg.rotation.z = (p[0]>0 ? 0.2 : -0.2); leg.rotation.x = (p[2]>0 ? 0.2 : -0.2);
+            leg.position.set(p[0], 2.7, p[1]); leg.rotation.z = (p[0]>0 ? 0.2 : -0.2); leg.rotation.x = (p[1]>0 ? 0.2 : -0.2);
             swing.add(leg);
         });
-        // Seile (Cylinder)
-        const ropeL = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 4.3), new THREE.MeshStandardMaterial({color:0x222}));
-        ropeL.position.set(-1, 3.3, 0); swing.add(ropeL);
-        const ropeR = ropeL.clone(); ropeR.position.set(1, 3.3, 0); swing.add(ropeR);
-        // Sitzbrett
-        const seat = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.1, 0.6), new THREE.MeshStandardMaterial({color: 0x222}));
-        seat.position.y = 1.1; seat.userData = { type: 'science_object', name: 'Schaukel' };
-        swing.add(seat); interactiveObjects.push(seat);
-
+        const ropeGeo = new THREE.CylinderGeometry(0.015, 0.015, 4.3);
+        const ropeMat = new THREE.MeshStandardMaterial({color:0x222});
+        [[-1, 3.3, 0], [1, 3.3, 0]].forEach(p => {
+            const rope = new THREE.Mesh(ropeGeo, ropeMat); rope.position.set(p[0], p[1], p[2]); swing.add(rope);
+        });
+        const sSeat = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.1, 0.6), new THREE.MeshStandardMaterial({color: 0x222}));
+        sSeat.position.y = 1.1; sSeat.userData = { type: 'science_object', name: 'Schaukel' };
+        swing.add(sSeat); interactiveObjects.push(sSeat);
         swing.position.set(-20, 0, -80); scene.add(swing);
 
-        // Newton Pendel (Verbessert)
+        // --- NEWTON PENDEL ---
         const newton = new THREE.Group();
-        const nf = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 0.2), new THREE.MeshStandardMaterial({color:0x777})); nf.position.y = 3; newton.add(nf);
+        const frameBack = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 0.2), new THREE.MeshStandardMaterial({color:0x777})); frameBack.position.y = 3; newton.add(frameBack);
         for(let i=0; i<5; i++) {
             const bGroup = new THREE.Group();
-            const string = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 4), new THREE.MeshStandardMaterial({color:0x222})); string.position.y = -2; bGroup.add(string);
+            const string = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 4), ropeMat); string.position.y = -2; bGroup.add(string);
             const ball = new THREE.Mesh(new THREE.SphereGeometry(0.48, 32, 32), new THREE.MeshStandardMaterial({color: 0xdddddd, metalness: 1}));
             ball.position.y = -4; ball.userData = { type: 'science_object', name: 'Newton Pendel' };
             bGroup.add(ball); bGroup.position.set(-2 + i*1.01, 6, 0); newton.add(bGroup); interactiveObjects.push(ball);
@@ -319,63 +353,55 @@
     }
 
     function buildEnvironment() {
-        const vegetationGroup = new THREE.Group(); scene.add(vegetationGroup);
-        const leafMat = new THREE.MeshStandardMaterial({ color: 0x2d5a27 });
+        const leafMat = new THREE.MeshStandardMaterial({color: 0x2d5a27});
+        const trunkMat = new THREE.MeshStandardMaterial({color: 0x4b3621});
         for(let i=0; i<80; i++) {
             const rx = (Math.random()-0.5)*500; const rz = (Math.random()-0.5)*500;
-            if(Math.abs(rx) < 65 && rz > -60 && rz < 50) continue;
+            if (Math.abs(rx) < 65 && rz > -60 && rz < 50) continue;
             const tree = new THREE.Group();
-            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 3), new THREE.MeshStandardMaterial({ color: 0x4b3621 })); trunk.position.y = 1.5; tree.add(trunk);
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 3), trunkMat); trunk.position.y = 1.5; tree.add(trunk);
             const l = new THREE.Mesh(new THREE.SphereGeometry(1.5, 8, 8), leafMat); l.position.y = 3.5; tree.add(l);
             tree.position.set(rx, 0, rz); scene.add(tree);
         }
     }
 
-    // ==========================================
-    // 5. INTERAKTION & VR
-    // ==========================================
-    window.orderKit = (type) => {
-        if (kitBox) scene.remove(kitBox); activeKitType = type; assemblyStep = 1;
+    function orderKit(type) {
+        if (kitBox) scene.remove(kitBox); activeKitType = type;
         kitBox = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 1.2), new THREE.MeshStandardMaterial({ color: 0xd2b48c }));
         kitBox.position.set(-28.5, 1.4, 0); kitBox.userData = { type: 'kit_box' };
         scene.add(kitBox); interactiveObjects.push(kitBox);
         document.getElementById('ai-panel').style.display = 'block';
-        document.getElementById('ai-content').innerText = `Paket ${type} bestellt. Bringe es zum Tisch und klicke es an zum Auspacken.`;
-    };
+        document.getElementById('ai-content').innerText = `Paket ${type} bestellt. Bringe es zum Tisch.`;
+    }
 
-    function unpackKit() {
-        if (!currentTable) return;
-        scene.remove(kitBox); kitBox = null; assemblyStep = 1; parts.forEach(p => scene.remove(p)); parts = [];
-        const tx = currentTable.pos.x, tz = currentTable.pos.z, th = currentTable.pos.y;
-        document.getElementById('assembly-panel').style.display = 'block';
-        const d = new THREE.Mesh(new THREE.BoxGeometry(0.6,0.6,0.6), new THREE.MeshStandardMaterial({color:0x3498db}));
-        d.position.set(tx, th+0.3, tz); d.userData = { step: 1 }; scene.add(d); parts.push(d); interactiveObjects.push(d);
-        totalSteps = 1;
+    function handleInteraction() {
+        const hits = raycaster.intersectObjects(scene.children, true);
+        if (hits.length === 0) return;
+        const target = hits[0].object;
+
+        if (target.userData.type === 'science_object') { explainObject(target.userData.name); return; }
+        if (target.userData.type === 'vr_order_btn') { orderKit(target.userData.kit); return; }
+        if (target.userData.type === 'table_tablet') { 
+            document.getElementById('ai-panel').style.display = 'block';
+            document.getElementById('ai-content').innerText = "Tablett aktiviert. KI-Mentor bereit.";
+            return; 
+        }
+        if (target.userData.type === 'kit_box') { if (!isCarrying) isCarrying = true; return; }
+        if (isCarrying && target.userData.type === 'table_top') { 
+            currentTable = target.userData; 
+            kitBox.position.copy(currentTable.pos).setY(currentTable.pos.y + 0.3); 
+            isCarrying = false; 
+            return; 
+        }
     }
 
     async function explainObject(name) {
-        const contentDiv = document.getElementById('ai-content');
-        const statusDiv = document.getElementById('ai-status');
         document.getElementById('ai-panel').style.display = 'block';
-        statusDiv.innerHTML = '<div class="loading-spinner"></div> Analysiere ' + name + '...';
+        document.getElementById('ai-status').innerText = "KI analysiert...";
         const text = await generateAIText(`Erkläre kurz das physikalische Prinzip von ${name} auf einem Spielplatz.`);
-        contentDiv.innerHTML = `<strong>Wissenschaft: ${name}</strong><br>${text}`;
-        await speakText(text);
-        statusDiv.innerText = "Bereit.";
-    }
-
-    window.getKitInstructions = async () => {
-        const text = await generateAIText(`Bauanleitung für ${activeKitType}. Max 3 Schritte.`);
-        document.getElementById('ai-content').innerHTML = `<strong>Anleitung:</strong><br>${text}`;
-        await speakText(text);
-    };
-
-    function setupVR() {
-        controllerR = renderer.xr.getController(0);
-        controllerR.addEventListener('selectstart', () => { raycaster.ray.origin.setFromMatrixPosition(controllerR.matrixWorld); const tM = new THREE.Matrix4(); tM.identity().extractRotation(controllerR.matrixWorld); raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tM); handleInteraction(); });
-        xrGroup.add(controllerR); controllerL = renderer.xr.getController(1); xrGroup.add(controllerL);
-        teleportMarker = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.04, 12, 32), new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 }));
-        teleportMarker.rotation.x = -Math.PI/2; teleportMarker.visible = false; scene.add(teleportMarker);
+        document.getElementById('ai-content').innerHTML = `<b>${name}</b><br>${text}`;
+        document.getElementById('ai-status').innerText = "Bereit.";
+        speakText(text);
     }
 
     function handleVRMovement() {
@@ -387,54 +413,27 @@
                 const dir = new THREE.Vector3(); camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
                 const side = new THREE.Vector3().crossVectors(camera.up, dir).normalize();
                 xrGroup.position.addScaledVector(dir, -axes[3] * moveSpeed); xrGroup.position.addScaledVector(side, -axes[2] * moveSpeed);
-                // Kollisions-Check (Unsichtbare Wände)
-                if(xrGroup.position.x > 19) xrGroup.position.x = 19;
-                if(xrGroup.position.x < -40) xrGroup.position.x = -40;
-                if(xrGroup.position.z > 17) xrGroup.position.z = 17;
             }
-            if (source.handedness === 'right') {
-                if (canSnapTurn && Math.abs(axes[2]) > 0.8) { xrGroup.rotation.y += (axes[2] > 0 ? -Math.PI/4 : Math.PI/4); canSnapTurn = false; setTimeout(() => canSnapTurn = true, 300); }
-                if (axes[3] < -0.6) {
-                    const tM = new THREE.Matrix4(); tM.identity().extractRotation(controllerL.matrixWorld); raycaster.ray.origin.setFromMatrixPosition(controllerL.matrixWorld); raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tM);
-                    const hits = raycaster.intersectObjects(floorMeshes);
-                    if (hits.length > 0) { teleportMarker.position.copy(hits[0].point); teleportMarker.visible = true; }
-                } else if (teleportMarker.visible) {
-                    const camPos = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
-                    xrGroup.position.add(new THREE.Vector3().copy(teleportMarker.position).sub(camPos.setY(0))); teleportMarker.visible = false;
-                }
+            if (source.handedness === 'right' && canSnapTurn && Math.abs(axes[2]) > 0.5) {
+                xrGroup.rotation.y += (axes[2] > 0 ? -Math.PI/4 : Math.PI/4);
+                canSnapTurn = false; setTimeout(() => canSnapTurn = true, 300);
             }
-        }
-    }
-
-    function handleInteraction() {
-        const hits = raycaster.intersectObjects(scene.children, true);
-        if (hits.length === 0) return;
-        const target = hits[0].object;
-        if (target.userData.type === 'science_object') { explainObject(target.userData.name); return; }
-        if (target.userData.type === 'table_tablet') { window.getKitInstructions(); return; }
-        if (target.userData.type === 'vr_order_btn') { orderKit(target.userData.kit); return; }
-        if (target.userData.type === 'kit_box') { if (!isCarrying && !currentTable) isCarrying = true; else if (!isCarrying && currentTable) unpackKit(); return; }
-        if (isCarrying && target.userData.type === 'table_top') { currentTable = target.userData; kitBox.position.copy(currentTable.pos).setY(currentTable.pos.y + 0.3); isCarrying = false; return; }
-        let p = target; while(p.parent && !p.userData.step) p = p.parent;
-        if(p && p.userData.step) {
-             p.position.set(currentTable.pos.x, currentTable.pos.y+0.3, currentTable.pos.z);
-             document.getElementById('progress-fill').style.width = "100%";
         }
     }
 
     function onMouseDown() { if (!renderer.xr.isPresenting) { raycaster.setFromCamera(mouse, camera); handleInteraction(); }}
-    function onMouseMove(event) {
-        mouse.x = (event.clientX/window.innerWidth)*2-1; mouse.y = -(event.clientY/window.innerHeight)*2+1;
-        if (isCarrying && kitBox && !renderer.xr.isPresenting) {
-            raycaster.setFromCamera(mouse, camera);
-            const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.1);
-            const intersectPoint = new THREE.Vector3(); raycaster.ray.intersectPlane(plane, intersectPoint);
-            kitBox.position.copy(intersectPoint);
+    function onMouseMove(e) { mouse.x = (e.clientX/window.innerWidth)*2-1; mouse.y = -(e.clientY/window.innerHeight)*2+1; }
+    function onWindowResize() { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
+
+    function animate() {
+        if (!renderer.xr.isPresenting) controls.update();
+        handleVRMovement();
+        if (isCarrying && kitBox) {
+            if (renderer.xr.isPresenting) kitBox.position.setFromMatrixPosition(controller1.matrixWorld);
         }
+        renderer.render(scene, camera);
     }
 
-    function animate() { if (!renderer.xr.isPresenting) controls.update(); handleVRMovement(); renderer.render(scene, camera); }
-    function onWindowResize() { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
     init();
 </script>
 
